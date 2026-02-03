@@ -13,13 +13,36 @@ from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallb
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
-NON_LINEAR_TORQUE_PARAMS = {
-  CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772],
-  CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
-}
-
-RAT_TORQUE_PARAMS = {
-  CAR.CHEVROLET_BOLT_EUV: [1.5, 0.4, 0.7, -0.12, 0.05],
+# Acadia ported from siglin
+# Silverado and Bolt are curves fit to steering data
+PL_TORQUE_PARAMS = {
+  CAR.GMC_ACADIA: (
+    [-4.        , -3.57894737, -3.15789474, -2.73684211, -2.31578947,
+        -1.89473684, -1.47368421, -1.05263158, -0.63157895, -0.21052632,
+         0.21052632,  0.63157895,  1.05263158,  1.47368421,  1.89473684,
+         2.31578947,  2.73684211,  3.15789474,  3.57894737,  4.        ],
+         [-1.69288228, -1.56142961, -1.42997674, -1.2985223 , -1.16705617,
+        -1.03550255, -0.90329485, -0.76622793, -0.59468496, -0.24210848,
+         0.35394392,  0.7065204 ,  0.87806337,  1.01513029,  1.14733799,
+         1.27889161,  1.41035774,  1.54181218,  1.67326505,  1.80471772]
+  ),
+  CAR.CHEVROLET_SILVERADO: (
+    [-1.94345798, -1.36092958, -1.1403284 , -0.86851078, -0.62763315,
+        -0.42766058, -0.30679224, -0.24618561, -0.20313874, -0.16282139,
+        -0.11081693, -0.05341054,  0.04738075,  0.18307001,  0.28958397,
+         0.39225609,  0.53721741,  0.72810697,  0.92637494,  1.16260609,
+         1.7156973 ],
+         [-1. , -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,  0. ,
+         0.1,  0.2,  0.3,  0.4,  0.5,  0.6,  0.7,  0.8,  0.9,  1. ]
+  ),
+  CAR.CHEVROLET_BOLT_EUV:
+      ([-2.26916035, -1.51287849, -1.36134079, -1.06070991, -0.7886563 ,
+        -0.54021994, -0.40366273, -0.32146206, -0.26967639, -0.22249178,
+        -0.1743709 , -0.11035225, -0.03037839,  0.05145825,  0.14062265,
+         0.23436737,  0.37227278,  0.59693567,  0.83389014,  1.03226944,
+         1.71732196],
+       [-1. , -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,  0. ,
+         0.1,  0.2,  0.3,  0.4,  0.5,  0.6,  0.7,  0.8,  0.9,  1. ])
 }
 
 
@@ -48,61 +71,23 @@ class CarInterface(CarInterfaceBase):
     else:
       return CarInterfaceBase.get_steer_feedforward_default
 
-  def get_lataccel_torque_siglin(self) -> tuple[list[float], np.ndarray]:
-
-    def torque_from_lateral_accel_siglin_func(lateral_acceleration: float) -> float:
-      # The "lat_accel vs torque" relationship is assumed to be the sum of "sigmoid + linear" curves
-      # An important thing to consider is that the slope at 0 should be > 0 (ideally >1)
-      # This has big effect on the stability about 0 (noise when going straight)
-      non_linear_torque_params = NON_LINEAR_TORQUE_PARAMS.get(self.CP.carFingerprint)
-      assert non_linear_torque_params, "The params are not defined"
-      a, b, c, _ = non_linear_torque_params
-      sig_input = a * lateral_acceleration
-      sig = np.sign(sig_input) * (1 / (1 + exp(-fabs(sig_input))) - 0.5)
-      steer_torque = (sig * b) + (lateral_acceleration * c)
-      return float(steer_torque)
-
-    lataccel_values = np.arange(-5.0, 5.0, 0.01)
-    torque_values = [torque_from_lateral_accel_siglin_func(x) for x in lataccel_values]
-    assert min(torque_values) < -1 and max(torque_values) > 1, "The torque values should cover the range [-1, 1]"
-    return torque_values, lataccel_values
-
-  def get_lataccel_torque_rational(self) -> tuple[list[float], np.ndarray]:
-
-    def torque_from_lateral_accel_rational_func(lateral_acceleration: float) -> float:
-      rat_torque_params = RAT_TORQUE_PARAMS.get(self.CP.carFingerprint)
-      assert rat_torque_params, "The params are not defined"
-      near_slope, far_slope, scale, x_intercept, y_intercept = rat_torque_params
-      x = lateral_acceleration - x_intercept
-      return y_intercept + x * (far_slope + (near_slope - far_slope) / (1 + (x / scale)**2))
-
-    lataccel_values = np.arange(-5.0, 5.0, 0.01)
-    torque_values = [torque_from_lateral_accel_rational_func(x) for x in lataccel_values]
-    return torque_values, lataccel_values
-
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
-    if self.CP.carFingerprint in RAT_TORQUE_PARAMS:
-      torque_values, lataccel_values = self.get_lataccel_torque_rational()
+    if self.CP.carFingerprint in PL_TORQUE_PARAMS:
+      lataccel_values, torque_values = PL_TORQUE_PARAMS[self.CP.carFingerprint]
 
-      def torque_from_lateral_accel_rational(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
+      def torque_from_lateral_accel_pl(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
         return np.interp(lateral_acceleration, lataccel_values, torque_values)
-      return torque_from_lateral_accel_rational
-    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
-      torque_values, lataccel_values = self.get_lataccel_torque_siglin()
-
-      def torque_from_lateral_accel_siglin(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
-        return np.interp(lateral_acceleration, lataccel_values, torque_values)
-      return torque_from_lateral_accel_siglin
+      return torque_from_lateral_accel_pl
     else:
       return self.torque_from_lateral_accel_linear
 
   def lateral_accel_from_torque(self) -> LateralAccelFromTorqueCallbackType:
     if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
-      torque_values, lataccel_values = self.get_lataccel_torque_siglin()
+      torque_values, lataccel_values = PL_TORQUE_PARAMS[self.CP.carFingerprint]
 
-      def lateral_accel_from_torque_siglin(torque: float, torque_params: structs.CarParams.LateralTorqueTuning):
+      def lateral_accel_from_torque_pl(torque: float, torque_params: structs.CarParams.LateralTorqueTuning):
         return np.interp(torque, torque_values, lataccel_values)
-      return lateral_accel_from_torque_siglin
+      return lateral_accel_from_torque_pl
     else:
       return self.lateral_accel_from_torque_linear
 
