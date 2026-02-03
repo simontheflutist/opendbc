@@ -14,9 +14,12 @@ TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
 NON_LINEAR_TORQUE_PARAMS = {
-  CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
   CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772],
   CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
+}
+
+RAT_TORQUE_PARAMS = {
+  CAR.CHEVROLET_BOLT_EUV: [1.5, 0.4, 0.7, -0.12, 0.05],
 }
 
 
@@ -64,8 +67,27 @@ class CarInterface(CarInterfaceBase):
     assert min(torque_values) < -1 and max(torque_values) > 1, "The torque values should cover the range [-1, 1]"
     return torque_values, lataccel_values
 
+  def get_lataccel_torque_rational(self) -> tuple[list[float], np.ndarray]:
+
+    def torque_from_lateral_accel_rational_func(lateral_acceleration: float) -> float:
+      rat_torque_params = RAT_TORQUE_PARAMS.get(self.CP.carFingerprint)
+      assert rat_torque_params, "The params are not defined"
+      near_slope, far_slope, scale, x_intercept, y_intercept = rat_torque_params
+      x = lateral_acceleration - x_intercept
+      return y_intercept + x * (far_slope + (near_slope - far_slope) / (1 + (x / scale)**2))
+
+    lataccel_values = np.arange(-5.0, 5.0, 0.01)
+    torque_values = [torque_from_lateral_accel_rational_func(x) for x in lataccel_values]
+    return torque_values, lataccel_values
+
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
-    if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
+    if self.CP.carFingerprint in RAT_TORQUE_PARAMS:
+      torque_values, lataccel_values = self.get_lataccel_torque_rational()
+
+      def torque_from_lateral_accel_rational(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
+        return np.interp(lateral_acceleration, lataccel_values, torque_values)
+      return torque_from_lateral_accel_rational
+    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       torque_values, lataccel_values = self.get_lataccel_torque_siglin()
 
       def torque_from_lateral_accel_siglin(lateral_acceleration: float, torque_params: structs.CarParams.LateralTorqueTuning):
