@@ -82,7 +82,7 @@ class CarInterface(CarInterfaceBase):
       return self.torque_from_lateral_accel_linear
 
   def lateral_accel_from_torque(self) -> LateralAccelFromTorqueCallbackType:
-    if self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
+    if self.CP.carFingerprint in PL_TORQUE_PARAMS:
       torque_values, lataccel_values = PL_TORQUE_PARAMS[self.CP.carFingerprint]
 
       def lateral_accel_from_torque_pl(torque: float, torque_params: structs.CarParams.LateralTorqueTuning):
