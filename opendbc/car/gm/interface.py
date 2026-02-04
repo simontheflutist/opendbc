@@ -14,7 +14,7 @@ TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
 NON_LINEAR_TORQUE_PARAMS = {
-  CAR.CHEVROLET_BOLT_EUV: [1.85, 1.8, 0.1, 0, 0.3],
+  CAR.CHEVROLET_BOLT_EUV: [1.2, 1.86, 0.03, 0., 0.3],
   CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772, 0.],
   CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122, 0.]
 }
